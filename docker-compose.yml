@@ -1,0 +1,14 @@
+services:
+  pipedeck:
+    build: .
+    image: pipedeck:latest
+    container_name: pipedeck
+    network_mode: host
+    environment:
+      - PORT=4190
+      - PIPEDECK_DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+      - /run/user/1000/pulse:/run/user/1000/pulse
+      - /run/user/1000/pipewire-0:/run/user/1000/pipewire-0
+    restart: unless-stopped

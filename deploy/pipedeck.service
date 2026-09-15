@@ -1,0 +1,15 @@
+[Unit]
+Description=PipeDeck audio routing hub
+After=pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/pipedeck
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=3
+Environment=PORT=4190
+
+[Install]
+WantedBy=default.target
