@@ -41,7 +41,22 @@ Verify first:
 pactl info
 ```
 
-## Quick start
+## One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/The-Code-Labz/pipedeck/main/install.sh | bash
+```
+
+The script installs Node.js (>= 20) and PipeWire if missing, clones the repo to `~/pipedeck`, builds, and installs a **systemd user service** so PipeDeck starts on login.
+
+Options:
+
+```bash
+PIPEDECK_DIR=/opt/pipedeck PIPEDECK_PORT=8080 bash install.sh   # custom location/port
+bash install.sh --no-service                                     # run in foreground, no systemd
+```
+
+## Quick start (manual)
 
 ```bash
 git clone https://github.com/The-Code-Labz/pipedeck.git
