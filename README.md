@@ -27,7 +27,8 @@ and multi-output like `game → headset + TV at once` via combined sinks.
 - **Per-app routing** — move any playback stream to any sink, any recording stream to any source, live.
 - **Volumes & mute** — per-device and per-stream, 0–150%.
 - **Default device** — one click.
-- **Profiles** — virtual devices are saved automatically; "Apply Profile" recreates them after reboot.
+- **Network / VBAN (Voicemeeter Potato equivalent)** — stream a mic or any audio to a *separate* PC (Linux **or Windows**) over the network, and receive audio back, via the [VBAN](https://www.vb-audio.com/Voicemeeter/vban.htm) protocol. Built for the streaming-PC / gaming-PC split setup: mic plugged into one box, needs to reach the other.
+- **Profiles** — virtual devices *and* VBAN streams are saved automatically; "Apply Profile" (and every restart) recreates them.
 - **Auto-refresh** — UI polls state every 2 seconds.
 
 ## Requirements
@@ -49,11 +50,17 @@ curl -fsSL https://raw.githubusercontent.com/The-Code-Labz/pipedeck/main/install
 
 The script installs Node.js (>= 20) and PipeWire if missing, clones the repo to `~/pipedeck`, builds, and installs a **systemd user service** so PipeDeck starts on login.
 
+The script also builds and installs `vban_emitter`/`vban_receptor` (from
+[quiniouben/vban](https://github.com/quiniouben/vban)) so the Network/VBAN
+panel works out of the box — this step is best-effort and never fails the
+rest of the install.
+
 Options:
 
 ```bash
 PIPEDECK_DIR=/opt/pipedeck PIPEDECK_PORT=8080 bash install.sh   # custom location/port
 bash install.sh --no-service                                     # run in foreground, no systemd
+bash install.sh --no-vban                                        # skip building the VBAN CLI tools
 ```
 
 ## Quick start (manual)
@@ -103,6 +110,38 @@ The service starts PipeDeck and applies the saved profile, so your combined outp
 
 For playback into the VM, create a **Combined Output** and point RustDesk's speaker at it if you want VM audio on both headset and TV.
 
+## Network / VBAN — Linux to Windows (or another Linux box)
+
+This is the piece RustDesk doesn't give you: a dedicated, low-latency audio
+link between two *separate* physical machines — no remote-desktop software
+in the loop. Same idea as Voicemeeter Potato's VBAN tab, built on
+[VBAN](https://www.vb-audio.com/Voicemeeter/vban.htm) (plain PCM-over-UDP,
+codec-free, OS-agnostic).
+
+**Headset on the Linux box, need it as a mic on a Windows box:**
+
+1. In PipeDeck's Network/VBAN panel, "Start emitter" — name it, destination
+   IP = the Windows box, port `6980`, device = your physical mic. PipeDeck
+   spawns `vban_emitter` and routes your mic into it automatically.
+2. On Windows: install [VB-CABLE](https://vb-audio.com/Cable/) (free), then
+   run [VBAN Receptor](https://vb-audio.com/Voicemeeter/vban.htm) (or
+   Voicemeeter's VBAN tab if you already run it) with stream name matching,
+   port `6980`, output device = CABLE Input.
+3. Select **CABLE Output** as the mic in Discord/the game/whatever needs it.
+
+**Streamer split-PC setup (mic → game PC, game/Discord audio → stream PC for OBS):**
+
+- Leg 1 (mic → game PC): emitter on the mic PC as above, port `6980`.
+- Leg 2 (game audio → stream PC): on the game PC (Windows), run VBAN Sender
+  pointed at the stream PC, port `6981`; on the stream PC, "Start receptor"
+  in PipeDeck with the game PC's IP, port `6981`, device = a null-sink OBS
+  is already capturing.
+
+Both legs are independent VBAN streams — PipeDeck tracks each as a child
+process, rebinds it onto the PipeWire device you picked, and restarts it
+automatically on reboot (saved in the same profile as combined sinks and
+virtual mics).
+
 ## API
 
 | Endpoint | Description |
@@ -116,7 +155,12 @@ For playback into the VM, create a **Combined Output** and point RustDesk's spea
 | `POST /api/combined-sink` | `{ name, slaves: string[] }` |
 | `POST /api/virtual-mic` | `{ name, mics: string[] }` |
 | `DELETE /api/module/:index` | Unload a virtual device |
-| `POST /api/profile/apply` | Recreate saved virtual devices |
+| `POST /api/profile/apply` | Recreate saved virtual devices and VBAN streams |
+| `GET /api/vban` | VBAN binary availability + running streams |
+| `POST /api/vban/emitter` | `{ name, ip, port, device, streamName?, rate?, channels? }` — capture `device` (a source) and send to `ip:port` |
+| `POST /api/vban/receptor` | `{ name, ip, port, device, streamName?, quality? }` — receive from `ip:port` and play into `device` (a sink) |
+| `POST /api/vban/:id/restart` | Restart a stream (e.g. after the binary crashed) |
+| `DELETE /api/vban/:id` | Stop a stream and remove it from the profile |
 
 ## How it works under the hood
 
@@ -124,8 +168,9 @@ No native modules — PipeDeck shells out to `pactl`, PipeWire's Pulse-compatibl
 
 - **Combined output** → `module-combine-sink` with N slaves
 - **Virtual mic** → `module-null-sink` with `media.class=Audio/Source/Virtual` (appears as a real microphone), plus one `module-loopback` per source mic feeding it
+- **Network / VBAN** → spawns `vban_emitter`/`vban_receptor` as tracked child processes; since those tools' pulseaudio backend opens a stream without letting you pick the device up front, PipeDeck finds the new source-output/sink-input by its stream name and `pactl move-source-output`/`move-sink-input`s it onto the PipeWire device you chose
 
-That means anything you create in PipeDeck is a standard PipeWire device — visible to every app, persistent as long as the modules are loaded, and removable from any other tool.
+That means anything you create in PipeDeck is a standard PipeWire device — visible to every app, persistent as long as the modules (or VBAN processes) are running, and removable from any other tool.
 
 ## Roadmap
 
