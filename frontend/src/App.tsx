@@ -1,6 +1,66 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Volume2, Mic, AudioLines, Radio, Layers, RefreshCw, Trash2, Star, Plus } from 'lucide-react'
+import { Volume2, Mic, AudioLines, Radio, Layers, RefreshCw, Trash2, Star, Plus, Network, RotateCw } from 'lucide-react'
 import * as api from './api'
+
+const statusColor: Record<api.VbanStream['status'], string> = {
+  running: 'bg-emerald-500/20 text-emerald-300',
+  starting: 'bg-yellow-500/20 text-yellow-300',
+  stopped: 'bg-zinc-700 text-zinc-400',
+  error: 'bg-red-500/20 text-red-300',
+}
+
+function VbanForm({ kind, sinks, sources, onCreate }: {
+  kind: 'emitter' | 'receptor'; sinks: api.Device[]; sources: api.Device[]
+  onCreate: (input: api.VbanCreateInput) => void
+}) {
+  const [name, setName] = useState(kind === 'emitter' ? 'MicToWin' : 'GameToStream')
+  const [ip, setIp] = useState('')
+  const [port, setPort] = useState(kind === 'emitter' ? 6980 : 6981)
+  const [device, setDevice] = useState('')
+  const deviceOptions = kind === 'emitter' ? sources : sinks
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-zinc-500">
+        {kind === 'emitter'
+          ? 'Capture a local mic and send it over VBAN to another PC (e.g. a Windows VM).'
+          : 'Receive a VBAN stream from another PC and play it into a local sink.'}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <input className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" placeholder="Name" value={name} onChange={e => setName(e.target.value)} />
+        <input className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" placeholder={kind === 'emitter' ? 'Destination IP' : 'Sender IP'} value={ip} onChange={e => setIp(e.target.value)} />
+        <input type="number" className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" placeholder="Port" value={port} onChange={e => setPort(Number(e.target.value))} />
+        <select className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" value={device} onChange={e => setDevice(e.target.value)}>
+          <option value="">{kind === 'emitter' ? 'Source (mic) to capture' : 'Sink to play into'}</option>
+          {deviceOptions.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+        </select>
+      </div>
+      <button
+        className="btn-primary flex items-center gap-1"
+        disabled={!name || !ip || !port || !device}
+        onClick={() => onCreate({ name, ip, port, device })}
+      ><Plus size={14} />Start {kind}</button>
+    </div>
+  )
+}
+
+function VbanRow({ s, onRestart, onRemove }: { s: api.VbanStream; onRestart: () => void; onRemove: () => void }) {
+  return (
+    <div className="py-2 border-b border-zinc-800/60 last:border-0 text-sm">
+      <div className="flex items-center gap-3">
+        <span className="badge bg-zinc-700 text-zinc-300">{s.kind}</span>
+        <span className="font-medium truncate">{s.name}</span>
+        <span className={`badge ${statusColor[s.status]}`}>{s.status}</span>
+        <span className="flex-1 text-xs text-zinc-500 truncate">
+          {s.kind === 'emitter' ? `${s.device} → ${s.ip}:${s.port}` : `${s.ip}:${s.port} → ${s.device}`} · stream "{s.streamName}"
+        </span>
+        <button className="btn" title="Restart" onClick={onRestart}><RotateCw size={14} /></button>
+        <button className="btn text-red-400" title="Stop & remove" onClick={onRemove}><Trash2 size={14} /></button>
+      </div>
+      {s.error && <div className="text-xs text-red-400 mt-1">{s.error}</div>}
+    </div>
+  )
+}
 
 function VolumeSlider({ kind, id, volume, mute, onChanged }: {
   kind: string; id: string | number; volume: number; mute: boolean; onChanged: () => void
@@ -177,6 +237,29 @@ export default function App() {
           </div>
         </section>
       </div>
+
+      <section className="card">
+        <h2 className="font-semibold mb-2 flex items-center gap-2"><Network size={16} className="text-purple-400" /> Network / VBAN <span className="text-xs font-normal text-zinc-500">(Voicemeeter Potato-style — stream mic/audio to a separate PC)</span></h2>
+        {!(state.vban.available.emitter && state.vban.available.receptor) && (
+          <div className="text-sm text-yellow-300 bg-yellow-500/10 rounded p-2 mb-3">
+            vban_emitter/vban_receptor not found on PATH. Build from{' '}
+            <a className="underline" href="https://github.com/quiniouben/vban" target="_blank" rel="noreferrer">quiniouben/vban</a>{' '}
+            (re-run <code>install.sh</code> to do it automatically) — streams below will fail to start until then.
+          </div>
+        )}
+        <div className="grid md:grid-cols-2 gap-6 mb-3">
+          <VbanForm kind="emitter" sinks={state.sinks} sources={state.sources}
+            onCreate={input => void api.createVbanEmitter(input).then(() => { setNotice(`Started emitter ${input.name}`); refresh() })} />
+          <VbanForm kind="receptor" sinks={state.sinks} sources={state.sources}
+            onCreate={input => void api.createVbanReceptor(input).then(() => { setNotice(`Started receptor ${input.name}`); refresh() })} />
+        </div>
+        {state.vban.streams.length === 0 && <p className="text-sm text-zinc-500">No VBAN streams configured.</p>}
+        {state.vban.streams.map(s => (
+          <VbanRow key={s.id} s={s}
+            onRestart={() => void api.restartVban(s.id).then(() => { setNotice(`Restarted ${s.name}`); refresh() })}
+            onRemove={() => void api.removeVban(s.id).then(() => { setNotice(`Removed ${s.name}`); refresh() })} />
+        ))}
+      </section>
 
       <section className="card">
         <h2 className="font-semibold mb-2 flex items-center gap-2"><Layers size={16} className="text-emerald-500" /> Loaded Virtual Devices</h2>

@@ -2,18 +2,20 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createCombinedSink, createVirtualMic, listModules } from './pipewire.js'
+import { startVbanStream, listVbanStreams, type VbanStreamSpec } from './vban.js'
 
 export interface CombinedSinkSpec { name: string; slaves: string[] }
 export interface VirtualMicSpec { name: string; mics: string[] }
 export interface Profile {
   combinedSinks: CombinedSinkSpec[]
   virtualMics: VirtualMicSpec[]
+  vbanStreams: VbanStreamSpec[]
 }
 
 const DATA_DIR = process.env.PIPEDECK_DATA_DIR || join(process.cwd(), '..', 'data')
 const PROFILE_PATH = join(DATA_DIR, 'profile.json')
 
-export const emptyProfile = (): Profile => ({ combinedSinks: [], virtualMics: [] })
+export const emptyProfile = (): Profile => ({ combinedSinks: [], virtualMics: [], vbanStreams: [] })
 
 export async function loadProfile(): Promise<Profile> {
   try {
@@ -42,6 +44,12 @@ export async function applyProfile(p: Profile): Promise<string[]> {
     if (loadedArgs.includes(`sink_name=${vm.name}`)) { actions.push(`skip ${vm.name} (already loaded)`); continue }
     await createVirtualMic(vm.name, vm.mics)
     actions.push(`created virtual mic ${vm.name}`)
+  }
+  const runningVban = new Set(listVbanStreams().filter(s => s.status === 'running' || s.status === 'starting').map(s => s.id))
+  for (const vs of p.vbanStreams) {
+    if (runningVban.has(vs.id)) { actions.push(`skip ${vs.name} (already running)`); continue }
+    await startVbanStream(vs)
+    actions.push(`started vban ${vs.kind} ${vs.name}`)
   }
   return actions
 }

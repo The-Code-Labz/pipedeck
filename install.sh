@@ -11,6 +11,7 @@ REPO_URL="https://github.com/The-Code-Labz/pipedeck.git"
 INSTALL_DIR="${PIPEDECK_DIR:-$HOME/pipedeck}"
 PORT="${PIPEDECK_PORT:-4190}"
 INSTALL_SERVICE=1
+INSTALL_VBAN=1
 NODE_MAJOR_MIN=20
 
 log()  { printf '\033[1;34m[pipedeck]\033[0m %s\n' "$*"; }
@@ -21,6 +22,7 @@ die()  { printf '\033[1;31m[pipedeck]\033[0m %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-service) INSTALL_SERVICE=0 ;;
+    --no-vban)    INSTALL_VBAN=0 ;;
     --port)       PORT="$2"; shift ;;
     *) die "unknown option: $1" ;;
   esac
@@ -144,6 +146,40 @@ EOF
   exit 1
 fi
 log "PipeWire session active: $(pactl info | awk -F': ' '/^Server Name/{print $2}')"
+
+# --- VBAN (network mic/audio bridge, Voicemeeter Potato style) ---------------
+# Optional: build vban_emitter/vban_receptor from source. Failure here is
+# non-fatal — the rest of PipeDeck works fine without it, and the "Network /
+# VBAN" panel just tells the user the binaries are missing.
+case "$PKG" in
+  apt-get) PKGS_VBAN_BUILD="autoconf automake build-essential libasound2-dev libpulse-dev pkg-config" ;;
+  dnf)     PKGS_VBAN_BUILD="autoconf automake gcc make alsa-lib-devel pulseaudio-libs-devel pkgconf-pkg-config" ;;
+  pacman)  PKGS_VBAN_BUILD="autoconf automake base-devel alsa-lib libpulse" ;;
+  zypper)  PKGS_VBAN_BUILD="autoconf automake gcc make alsa-devel libpulse-devel pkg-config" ;;
+esac
+
+if [ "$INSTALL_VBAN" -eq 1 ]; then
+  if command -v vban_emitter >/dev/null 2>&1 && command -v vban_receptor >/dev/null 2>&1; then
+    log "vban_emitter/vban_receptor already installed"
+  else
+    log "building vban (quiniouben/vban) for the Network/VBAN panel"
+    if pkg_install $PKGS_VBAN_BUILD; then
+      VBAN_SRC="$(mktemp -d)"
+      if git clone --depth 1 https://github.com/quiniouben/vban.git "$VBAN_SRC/vban" >/tmp/vban-build.log 2>&1 \
+        && (cd "$VBAN_SRC/vban" && ./autogen.sh && ./configure --disable-jack && make -j"$(nproc 2>/dev/null || echo 2)") >>/tmp/vban-build.log 2>&1 \
+        && (cd "$VBAN_SRC/vban" && $SUDO make install) >>/tmp/vban-build.log 2>&1; then
+        log "vban_emitter/vban_receptor installed"
+      else
+        warn "vban build failed — see /tmp/vban-build.log. Network/VBAN panel will report binaries missing until you install them manually."
+      fi
+      rm -rf "$VBAN_SRC"
+    else
+      warn "couldn't install vban build dependencies — skipping. Network/VBAN panel will report binaries missing."
+    fi
+  fi
+else
+  log "skipping vban build (--no-vban)"
+fi
 
 # --- clone or update ----------------------------------------------------------
 if [ -d "$INSTALL_DIR/.git" ]; then

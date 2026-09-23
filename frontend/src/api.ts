@@ -6,11 +6,24 @@ export interface Stream {
   id: number; app: string; media: string; target: string; volume: number; mute: boolean
 }
 export interface LoadedModule { index: number; name: string; args: string; ours: boolean }
-export interface Profile { combinedSinks: { name: string; slaves: string[] }[]; virtualMics: { name: string; mics: string[] }[] }
+export interface VbanStreamSpec {
+  id: string; kind: 'emitter' | 'receptor'; name: string; ip: string; port: number
+  streamName: string; device: string; rate?: number; channels?: number; quality?: number
+}
+export interface VbanStream extends VbanStreamSpec {
+  pid: number | null; status: 'starting' | 'running' | 'stopped' | 'error'; error?: string
+  startedAt: number | null; log: string[]
+}
+export interface VbanInfo { available: { emitter: boolean; receptor: boolean }; streams: VbanStream[] }
+export interface Profile {
+  combinedSinks: { name: string; slaves: string[] }[]
+  virtualMics: { name: string; mics: string[] }[]
+  vbanStreams: VbanStreamSpec[]
+}
 export interface State {
   sinks: Device[]; sources: Device[]
   sinkInputs: Stream[]; sourceOutputs: Stream[]
-  modules: LoadedModule[]; profile: Profile
+  modules: LoadedModule[]; profile: Profile; vban: VbanInfo
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -39,3 +52,16 @@ export const unloadModule = (index: number) =>
   req(`/api/module/${index}`, { method: 'DELETE' })
 export const applyProfile = () =>
   req<{ actions: string[] }>('/api/profile/apply', { method: 'POST' })
+
+export interface VbanCreateInput {
+  name: string; ip: string; port: number; device: string
+  streamName?: string; rate?: number; channels?: number; quality?: number
+}
+export const createVbanEmitter = (input: VbanCreateInput) =>
+  req<VbanStream>('/api/vban/emitter', { method: 'POST', body: JSON.stringify(input) })
+export const createVbanReceptor = (input: VbanCreateInput) =>
+  req<VbanStream>('/api/vban/receptor', { method: 'POST', body: JSON.stringify(input) })
+export const restartVban = (id: string) =>
+  req<VbanStream>(`/api/vban/${id}/restart`, { method: 'POST' })
+export const removeVban = (id: string) =>
+  req(`/api/vban/${id}`, { method: 'DELETE' })
