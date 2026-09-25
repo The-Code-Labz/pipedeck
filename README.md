@@ -84,10 +84,13 @@ npm run dev
 ## Docker
 
 ```bash
+export UID
 docker compose up -d
 ```
 
-The container needs the host's PipeWire socket — `docker-compose.yml` mounts `/run/user/1000/pulse` and uses host networking so `pactl` sees your real audio graph.
+The container needs the host's PipeWire socket — `docker-compose.yml` mounts `/run/user/$UID/pulse` and `/run/user/$UID/pipewire-0`, sets `XDG_RUNTIME_DIR` to match so `pactl` inside the container actually finds them, and uses host networking so `pactl` sees your real audio graph (also required for VBAN's raw UDP traffic).
+
+`export UID` is required because Compose doesn't auto-export bash's built-in `$UID` — without it the mounts silently fall back to `1000`. If your host user isn't UID 1000, `export UID` picks up the correct value automatically.
 
 ## Persistence across reboots
 
