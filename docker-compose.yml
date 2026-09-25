@@ -7,8 +7,9 @@ services:
     environment:
       - PORT=4190
       - PIPEDECK_DATA_DIR=/app/data
+      - XDG_RUNTIME_DIR=/run/user/${UID:-1000}
     volumes:
       - ./data:/app/data
-      - /run/user/1000/pulse:/run/user/1000/pulse
-      - /run/user/1000/pipewire-0:/run/user/1000/pipewire-0
+      - /run/user/${UID:-1000}/pulse:/run/user/${UID:-1000}/pulse
+      - /run/user/${UID:-1000}/pipewire-0:/run/user/${UID:-1000}/pipewire-0
     restart: unless-stopped
