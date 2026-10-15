@@ -11,6 +11,7 @@ export interface Device {
   mute: boolean
   isDefault: boolean
   virtual: boolean
+  monitor: boolean // a sink's loopback-as-source — i.e. "desktop audio" / what-you-hear
 }
 
 export interface Stream {
@@ -75,6 +76,7 @@ async function listDevices(kind: 'sinks' | 'sources'): Promise<Device[]> {
       volume, mute,
       isDefault: name === def,
       virtual: VIRTUAL_MARKERS.some(m => name.includes(m)),
+      monitor: name.endsWith('.monitor'),
     })
   }
   return devices
@@ -186,6 +188,36 @@ export async function listModules(): Promise<LoadedModule[]> {
       ours: name === 'module-combine-sink' || name === 'module-null-sink' || name === 'module-loopback',
     }
   }).filter(m => m.ours)
+}
+
+// --- Routing matrix (Voicemeeter-style "patch any input to any output") ---
+// Every cell in the matrix is a live module-loopback: source -> sink.
+// Many can fan in/out of the same device simultaneously, unlike move-stream
+// (which only ever picks one destination for an existing app stream).
+export interface Route { id: number; source: string; sink: string }
+
+export async function listRoutes(): Promise<Route[]> {
+  const loaded = await listModules()
+  const routes: Route[] = []
+  for (const m of loaded) {
+    if (m.name !== 'module-loopback') continue
+    const source = m.args.match(/source=(\S+)/)?.[1]
+    const sink = m.args.match(/sink=(\S+)/)?.[1]
+    if (source && sink) routes.push({ id: m.index, source, sink })
+  }
+  return routes
+}
+
+export async function createRoute(source: string, sink: string): Promise<number> {
+  const out = await pactl([
+    'load-module', 'module-loopback', `source=${source}`, `sink=${sink}`, 'latency_msec=1',
+    'sink_input_properties=media.name=pipedeck-route',
+  ])
+  return parseInt(out.trim(), 10)
+}
+
+export async function removeRoute(id: number): Promise<void> {
+  await unloadModule(id)
 }
 
 export async function pipewireAvailable(): Promise<boolean> {

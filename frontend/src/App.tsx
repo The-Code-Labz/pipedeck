@@ -18,12 +18,14 @@ function VbanForm({ kind, sinks, sources, onCreate }: {
   const [port, setPort] = useState(kind === 'emitter' ? 6980 : 6981)
   const [device, setDevice] = useState('')
   const deviceOptions = kind === 'emitter' ? sources : sinks
+  const defaultMonitor = kind === 'emitter' ? sources.find(d => d.monitor && sinks.some(s => s.isDefault && d.name === `${s.name}.monitor`)) : undefined
+  const defaultMic = kind === 'emitter' ? sources.find(d => d.isDefault && !d.monitor) : undefined
 
   return (
     <div className="space-y-2">
       <p className="text-xs text-zinc-500">
         {kind === 'emitter'
-          ? 'Capture a local mic and send it over VBAN to another PC (e.g. a Windows VM).'
+          ? 'Capture a local mic (or desktop/system audio) and send it over VBAN to another PC (e.g. a Windows VM / Voicemeeter).'
           : 'Receive a VBAN stream from another PC and play it into a local sink.'}
       </p>
       <div className="grid grid-cols-2 gap-2">
@@ -31,10 +33,16 @@ function VbanForm({ kind, sinks, sources, onCreate }: {
         <input className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" placeholder={kind === 'emitter' ? 'Destination IP' : 'Sender IP'} value={ip} onChange={e => setIp(e.target.value)} />
         <input type="number" className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" placeholder="Port" value={port} onChange={e => setPort(Number(e.target.value))} />
         <select className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm" value={device} onChange={e => setDevice(e.target.value)}>
-          <option value="">{kind === 'emitter' ? 'Source (mic) to capture' : 'Sink to play into'}</option>
-          {deviceOptions.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+          <option value="">{kind === 'emitter' ? 'Source: mic or desktop audio (monitor)' : 'Sink to play into'}</option>
+          {deviceOptions.map(d => <option key={d.name} value={d.name}>{d.monitor ? `🖥 Desktop Audio (${d.name})` : d.name}</option>)}
         </select>
       </div>
+      {kind === 'emitter' && (
+        <div className="flex gap-2">
+          {defaultMic && <button type="button" className="btn text-xs" onClick={() => setDevice(defaultMic.name)}><Mic size={12} className="inline mr-1" />Use default mic</button>}
+          {defaultMonitor && <button type="button" className="btn text-xs" onClick={() => setDevice(defaultMonitor.name)}><AudioLines size={12} className="inline mr-1" />Use desktop audio</button>}
+        </div>
+      )}
       <button
         className="btn-primary flex items-center gap-1"
         disabled={!name || !ip || !port || !device}
@@ -77,13 +85,17 @@ function VolumeSlider({ kind, id, volume, mute, onChanged }: {
   )
 }
 
-function DeviceRow({ d, kind, refresh }: { d: api.Device; kind: 'sink' | 'source'; refresh: () => void }) {
+function DeviceRow({ d, kind, refresh, soloed, onToggleSolo }: {
+  d: api.Device; kind: 'sink' | 'source'; refresh: () => void
+  soloed: string | null; onToggleSolo: (name: string) => void
+}) {
   return (
     <div className="flex items-center gap-3 py-2 border-b border-zinc-800/60 last:border-0">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{d.name}</span>
           {d.virtual && <span className="badge bg-purple-500/20 text-purple-300">virtual</span>}
+          {d.monitor && <span className="badge bg-blue-500/20 text-blue-300">desktop audio</span>}
           {d.state !== 'RUNNING' && <span className="badge bg-zinc-700 text-zinc-400">{d.state.toLowerCase()}</span>}
         </div>
       </div>
@@ -93,10 +105,56 @@ function DeviceRow({ d, kind, refresh }: { d: api.Device; kind: 'sink' | 'source
         onClick={() => void api.setMute(kind, d.name, !d.mute).then(refresh)}
       >Mute</button>
       <button
+        className={soloed === d.name ? 'btn-primary' : 'btn'}
+        title="Solo (mute all other strips of this kind)"
+        onClick={() => onToggleSolo(d.name)}
+      >Solo</button>
+      <button
         className={d.isDefault ? 'btn-primary' : 'btn'}
         title="Set as default"
         onClick={() => void api.setDefault(kind, d.name).then(refresh)}
       ><Star size={14} /></button>
+    </div>
+  )
+}
+
+function RoutingMatrix({ sources, sinks, routes, onToggle }: {
+  sources: api.Device[]; sinks: api.Device[]; routes: api.Route[]
+  onToggle: (source: string, sink: string, enable: boolean) => void
+}) {
+  const has = (source: string, sink: string) => routes.some(r => r.source === source && r.sink === sink)
+  return (
+    <div className="overflow-x-auto">
+      <table className="text-xs border-collapse">
+        <thead>
+          <tr>
+            <th className="p-1 text-left sticky left-0 bg-zinc-900">Source ↓ / Output →</th>
+            {sinks.map(s => (
+              <th key={s.name} className="p-1 font-normal text-zinc-400 whitespace-nowrap max-w-[90px] truncate" title={s.name}>
+                {s.monitor ? '🖥' : ''}{s.name}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sources.map(src => (
+            <tr key={src.name} className="border-t border-zinc-800/60">
+              <td className="p-1 pr-3 font-medium whitespace-nowrap sticky left-0 bg-zinc-900 max-w-[140px] truncate" title={src.name}>
+                {src.monitor ? '🖥 ' : src.virtual ? '🔀 ' : '🎙 '}{src.name}
+              </td>
+              {sinks.map(snk => (
+                <td key={snk.name} className="p-1 text-center">
+                  <input
+                    type="checkbox"
+                    checked={has(src.name, snk.name)}
+                    onChange={e => onToggle(src.name, snk.name, e.target.checked)}
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -109,10 +167,28 @@ export default function App() {
   const [micName, setMicName] = useState('VirtualMic')
   const [micSources, setMicSources] = useState<Set<string>>(new Set())
   const [notice, setNotice] = useState<string | null>(null)
+  const [soloSink, setSoloSink] = useState<string | null>(null)
+  const [soloSource, setSoloSource] = useState<string | null>(null)
+  const muteSnapshot = useState(() => new Map<string, boolean>())[0]
 
   const refresh = useCallback(() => {
     api.getState().then(setState).catch(e => setError(String(e.message || e)))
   }, [])
+
+  function toggleSolo(kind: 'sink' | 'source', devices: api.Device[], soloed: string | null, setSoloed: (v: string | null) => void, name: string) {
+    if (soloed === name) {
+      for (const d of devices) {
+        const prev = muteSnapshot.get(`${kind}:${d.name}`)
+        if (prev !== undefined) void api.setMute(kind, d.name, prev)
+      }
+      setSoloed(null)
+    } else {
+      for (const d of devices) muteSnapshot.set(`${kind}:${d.name}`, d.mute)
+      for (const d of devices) void api.setMute(kind, d.name, d.name !== name)
+      setSoloed(name)
+    }
+    setTimeout(refresh, 150)
+  }
 
   useEffect(() => {
     refresh()
@@ -149,12 +225,30 @@ export default function App() {
 
       <section className="card">
         <h2 className="font-semibold mb-2 flex items-center gap-2"><Volume2 size={16} className="text-emerald-500" /> Outputs <span className="text-zinc-500 text-xs font-normal">(A1/A2/A3 hardware bus equivalent — set multiple defaults via combined sink below)</span></h2>
-        {state.sinks.map(d => <DeviceRow key={d.name} d={d} kind="sink" refresh={refresh} />)}
+        {state.sinks.map(d => <DeviceRow key={d.name} d={d} kind="sink" refresh={refresh} soloed={soloSink} onToggleSolo={name => toggleSolo('sink', state.sinks, soloSink, setSoloSink, name)} />)}
       </section>
 
       <section className="card">
-        <h2 className="font-semibold mb-2 flex items-center gap-2"><Mic size={16} className="text-emerald-500" /> Inputs / Mics</h2>
-        {state.sources.map(d => <DeviceRow key={d.name} d={d} kind="source" refresh={refresh} />)}
+        <h2 className="font-semibold mb-2 flex items-center gap-2"><Mic size={16} className="text-emerald-500" /> Inputs / Mics <span className="text-zinc-500 text-xs font-normal">(includes 🖥 desktop-audio monitors)</span></h2>
+        {state.sources.map(d => <DeviceRow key={d.name} d={d} kind="source" refresh={refresh} soloed={soloSource} onToggleSolo={name => toggleSolo('source', state.sources, soloSource, setSoloSource, name)} />)}
+      </section>
+
+      <section className="card">
+        <h2 className="font-semibold mb-2 flex items-center gap-2"><Layers size={16} className="text-emerald-500" /> Routing Matrix <span className="text-xs font-normal text-zinc-500">(Voicemeeter-style — patch any input to any output, any number at once)</span></h2>
+        <RoutingMatrix
+          sources={state.sources}
+          sinks={state.sinks}
+          routes={state.routes}
+          onToggle={(source, sink, enable) => {
+            const p = enable
+              ? api.createRoute(source, sink)
+              : (() => {
+                  const existing = state.routes.find(route => route.source === source && route.sink === sink)
+                  return existing ? api.removeRoute(existing.id) : Promise.resolve()
+                })()
+            void p.then(refresh).catch(e => setNotice(String(e.message || e)))
+          }}
+        />
       </section>
 
       <section className="card">

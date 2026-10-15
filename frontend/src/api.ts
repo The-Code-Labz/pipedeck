@@ -1,7 +1,8 @@
 export interface Device {
   id: number; name: string; description: string; state: string
-  volume: number; mute: boolean; isDefault: boolean; virtual: boolean
+  volume: number; mute: boolean; isDefault: boolean; virtual: boolean; monitor: boolean
 }
+export interface Route { id: number; source: string; sink: string }
 export interface Stream {
   id: number; app: string; media: string; target: string; volume: number; mute: boolean
 }
@@ -19,11 +20,12 @@ export interface Profile {
   combinedSinks: { name: string; slaves: string[] }[]
   virtualMics: { name: string; mics: string[] }[]
   vbanStreams: VbanStreamSpec[]
+  routes: { source: string; sink: string }[]
 }
 export interface State {
   sinks: Device[]; sources: Device[]
   sinkInputs: Stream[]; sourceOutputs: Stream[]
-  modules: LoadedModule[]; profile: Profile; vban: VbanInfo
+  modules: LoadedModule[]; routes: Route[]; profile: Profile; vban: VbanInfo
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -52,6 +54,10 @@ export const unloadModule = (index: number) =>
   req(`/api/module/${index}`, { method: 'DELETE' })
 export const applyProfile = () =>
   req<{ actions: string[] }>('/api/profile/apply', { method: 'POST' })
+export const createRoute = (source: string, sink: string) =>
+  req<{ id: number }>('/api/routes', { method: 'POST', body: JSON.stringify({ source, sink }) })
+export const removeRoute = (id: number) =>
+  req(`/api/routes/${id}`, { method: 'DELETE' })
 
 export interface VbanCreateInput {
   name: string; ip: string; port: number; device: string

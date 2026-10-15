@@ -24,8 +24,11 @@ and multi-output like `game → headset + TV at once` via combined sinks.
 
 - **Outputs (A1/A2/A3 equivalent)** — combined sinks: pick any 2+ output devices, one virtual sink plays to all of them simultaneously (headset + TV).
 - **Virtual mic (B1/B2 equivalent)** — merge multiple physical mics into a single microphone endpoint. RustDesk, Discord, or a Windows Proxmox VM sees one clean mic.
+- **Routing Matrix (Voicemeeter-style patch bay)** — a live grid of every input (mics, apps, **and desktop/system audio monitors**) against every output; check a cell to patch that input into that output, any number of simultaneous connections, no limit to 1-destination-at-a-time like per-app routing below.
+- **Desktop audio capture** — every sink's `.monitor` source (what-you-hear) shows up tagged 🖥 right alongside your mics everywhere a source is picked — routing matrix, VBAN emitter, virtual mic — so sending system/game audio (not just the mic) to another PC or app is a checkbox, not a workaround.
 - **Per-app routing** — move any playback stream to any sink, any recording stream to any source, live.
 - **Volumes & mute** — per-device and per-stream, 0–150%.
+- **Solo** — isolate one strip; mutes every other device of the same kind (restores their prior mute state when un-solo'd).
 - **Default device** — one click.
 - **Network / VBAN (Voicemeeter Potato equivalent)** — stream a mic or any audio to a *separate* PC (Linux **or Windows**) over the network, and receive audio back, via the [VBAN](https://www.vb-audio.com/Voicemeeter/vban.htm) protocol. Built for the streaming-PC / gaming-PC split setup: mic plugged into one box, needs to reach the other.
 - **Profiles** — virtual devices *and* VBAN streams are saved automatically; "Apply Profile" (and every restart) recreates them.
@@ -157,8 +160,11 @@ virtual mics).
 | `POST /api/default` | `{ kind: "sink" \| "source", name }` |
 | `POST /api/combined-sink` | `{ name, slaves: string[] }` |
 | `POST /api/virtual-mic` | `{ name, mics: string[] }` |
+| `GET /api/routes` | List active routing-matrix patches (`{ id, source, sink }`) |
+| `POST /api/routes` | `{ source, sink }` — patch any source into any sink (one matrix cell) |
+| `DELETE /api/routes/:id` | Unpatch one matrix cell |
 | `DELETE /api/module/:index` | Unload a virtual device |
-| `POST /api/profile/apply` | Recreate saved virtual devices and VBAN streams |
+| `POST /api/profile/apply` | Recreate saved virtual devices, routes, and VBAN streams |
 | `GET /api/vban` | VBAN binary availability + running streams |
 | `POST /api/vban/emitter` | `{ name, ip, port, device, streamName?, rate?, channels? }` — capture `device` (a source) and send to `ip:port` |
 | `POST /api/vban/receptor` | `{ name, ip, port, device, streamName?, quality? }` — receive from `ip:port` and play into `device` (a sink) |
@@ -171,6 +177,8 @@ No native modules — PipeDeck shells out to `pactl`, PipeWire's Pulse-compatibl
 
 - **Combined output** → `module-combine-sink` with N slaves
 - **Virtual mic** → `module-null-sink` with `media.class=Audio/Source/Virtual` (appears as a real microphone), plus one `module-loopback` per source mic feeding it
+- **Routing Matrix** → each checked cell is its own `module-loopback source=<X> sink=<Y>`. Unlike `move-stream` (which rebinds an existing app stream to exactly one destination), a loopback can fan one source into any number of sinks and a sink can mix in any number of sources at once — that's the generalized patch bay Combined Output / Virtual Mic are themselves built from.
+- **Desktop audio / monitor sources** → PipeWire already exposes every sink's loopback as a `<sink-name>.monitor` source; PipeDeck just surfaces it (tagged 🖥) in every source picker instead of hiding it in the raw device list.
 - **Network / VBAN** → spawns `vban_emitter`/`vban_receptor` as tracked child processes; since those tools' pulseaudio backend opens a stream without letting you pick the device up front, PipeDeck finds the new source-output/sink-input by its stream name and `pactl move-source-output`/`move-sink-input`s it onto the PipeWire device you chose
 
 That means anything you create in PipeDeck is a standard PipeWire device — visible to every app, persistent as long as the modules (or VBAN processes) are running, and removable from any other tool.
@@ -179,7 +187,8 @@ That means anything you create in PipeDeck is a standard PipeWire device — vis
 
 - [ ] WebSocket push instead of polling
 - [ ] Per-app volume remember/reapply rules
-- [ ] EQ/noise-gain strip (via EasyEffects preset hook)
+- [ ] Live VU/peak meters per strip (needs a real-time level tap — `pactl`/`pw-mon` don't expose peak dB, would require a small native/PipeWire-API helper)
+- [ ] EQ/compressor/gate/denoiser per strip, Potato-style (`module-filter-chain` + LADSPA/LV2, e.g. `calf`/`zam-plugins` — bigger lift than a config tweak, needs its own filter-graph builder)
 - [ ] Dark/light theme toggle
 
 ## License
