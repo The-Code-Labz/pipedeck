@@ -33,6 +33,7 @@ and multi-output like `game → headset + TV at once` via combined sinks.
 - **Network / VBAN (Voicemeeter Potato equivalent)** — stream a mic or any audio to a *separate* PC (Linux **or Windows**) over the network, and receive audio back, via the [VBAN](https://www.vb-audio.com/Voicemeeter/vban.htm) protocol. Built for the streaming-PC / gaming-PC split setup: mic plugged into one box, needs to reach the other.
 - **Profiles** — virtual devices *and* VBAN streams are saved automatically; "Apply Profile" (and every restart) recreates them.
 - **Auto-refresh** — UI polls state every 2 seconds.
+- **In-app self-update** — "Updates" panel checks `origin` for new commits and, on click, `git pull`s, `npm install`s, rebuilds backend + frontend, and restarts the service — no manual re-clone/rebuild on the box.
 
 ## Requirements
 
@@ -170,6 +171,17 @@ virtual mics).
 | `POST /api/vban/receptor` | `{ name, ip, port, device, streamName?, quality? }` — receive from `ip:port` and play into `device` (a sink) |
 | `POST /api/vban/:id/restart` | Restart a stream (e.g. after the binary crashed) |
 | `DELETE /api/vban/:id` | Stop a stream and remove it from the profile |
+| `GET /api/update/status?fetch=1` | Current/latest commit, ahead/behind counts vs `origin`, dirty-tree flag. `fetch=1` runs `git fetch` first; omit it to just read local state |
+| `POST /api/update/apply` | Pull, `npm install` + rebuild backend & frontend, then restart (via `systemctl --user restart pipedeck` under the systemd service, or process exit otherwise). Refuses if the repo has uncommitted local changes |
+
+## Updating
+
+Click **Check for updates** → **Update now** in the GUI's "Updates" panel. That's the whole flow — no `git clone`/`npm install`/`npm run build` by hand on the target box. Requires:
+
+- a clean working tree in the repo directory (no local edits) — the endpoint refuses otherwise
+- `origin` reachable (it just does a normal `git fetch`/`git merge --ff-only`)
+
+Running under the systemd user service installed by `install.sh`? The restart is automatic (`systemctl --user restart pipedeck`). Running `npm start` by hand instead, the process exits after building and you restart it yourself.
 
 ## How it works under the hood
 

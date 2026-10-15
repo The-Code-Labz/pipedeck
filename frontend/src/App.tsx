@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Volume2, Mic, AudioLines, Radio, Layers, RefreshCw, Trash2, Star, Plus, Network, RotateCw } from 'lucide-react'
+import { Volume2, Mic, AudioLines, Radio, Layers, RefreshCw, Trash2, Star, Plus, Network, RotateCw, GitBranch, Download } from 'lucide-react'
 import * as api from './api'
 
 const statusColor: Record<api.VbanStream['status'], string> = {
@@ -156,6 +156,62 @@ function RoutingMatrix({ sources, sinks, routes, onToggle }: {
         </tbody>
       </table>
     </div>
+  )
+}
+
+function UpdatePanel() {
+  const [status, setStatus] = useState<api.UpdateStatus | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [log, setLog] = useState<string[]>([])
+  const [err, setErr] = useState<string | null>(null)
+  const [restarting, setRestarting] = useState(false)
+
+  const check = useCallback((fetchRemote: boolean) => {
+    setChecking(true); setErr(null)
+    api.getUpdateStatus(fetchRemote).then(setStatus).catch(e => setErr(String(e.message || e))).finally(() => setChecking(false))
+  }, [])
+
+  useEffect(() => { check(false) }, [check])
+
+  const apply = () => {
+    setApplying(true); setErr(null); setLog([])
+    api.applyUpdate()
+      .then(r => { setLog(r.log); setRestarting(r.restarting || true); return check(true) })
+      .catch(e => setErr(String(e.message || e)))
+      .finally(() => setApplying(false))
+  }
+
+  return (
+    <section className="card">
+      <h2 className="font-semibold mb-2 flex items-center gap-2"><GitBranch size={16} className="text-emerald-500" /> Updates <span className="text-xs font-normal text-zinc-500">(pull latest from git, rebuild, restart — no re-clone needed)</span></h2>
+      {status && (
+        <div className="text-sm text-zinc-400 mb-2 space-y-1">
+          <div>branch <span className="text-zinc-200">{status.branch}</span> · current <span className="text-zinc-200 font-mono">{status.current?.short}</span> {status.current && <span className="text-zinc-500">— {status.current.message}</span>}</div>
+          {status.latest && status.updateAvailable && (
+            <div className="text-yellow-300">
+              {status.behind} commit{status.behind === 1 ? '' : 's'} behind origin/{status.branch} · latest <span className="font-mono">{status.latest.short}</span> — {status.latest.message}
+            </div>
+          )}
+          {status.latest && !status.updateAvailable && <div className="text-emerald-400">up to date</div>}
+          {status.dirty && <div className="text-red-400">local changes detected — update is disabled until the repo is clean</div>}
+          {status.offline && <div className="text-zinc-500">couldn't reach origin (offline?) — showing last known status</div>}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <button className="btn flex items-center gap-1" disabled={checking} onClick={() => check(true)}>
+          <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />Check for updates
+        </button>
+        <button
+          className="btn-primary flex items-center gap-1"
+          disabled={applying || !status?.updateAvailable || status?.dirty}
+          onClick={apply}
+        ><Download size={14} />{applying ? 'Updating…' : 'Update now'}</button>
+        {restarting && <span className="text-xs text-emerald-400">restarting — page will reconnect once the service is back up</span>}
+      </div>
+      {err && <div className="text-xs text-red-400 mt-2">{err}</div>}
+      {log.length > 0 && <pre className="mt-2 text-xs bg-zinc-950 border border-zinc-800 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap">{log.join('\n')}</pre>}
+    </section>
   )
 }
 
@@ -354,6 +410,8 @@ export default function App() {
             onRemove={() => void api.removeVban(s.id).then(() => { setNotice(`Removed ${s.name}`); refresh() })} />
         ))}
       </section>
+
+      <UpdatePanel />
 
       <section className="card">
         <h2 className="font-semibold mb-2 flex items-center gap-2"><Layers size={16} className="text-emerald-500" /> Loaded Virtual Devices</h2>
