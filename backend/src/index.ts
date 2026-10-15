@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import {
   pipewireAvailable, listSinks, listSources, listSinkInputs, listSourceOutputs,
   setVolume, setMute, moveStream, setDefault, createCombinedSink, createVirtualMic,
-  unloadModule, listModules,
+  unloadModule, listModules, listRoutes, createRoute, removeRoute,
 } from './pipewire.js'
 import { loadProfile, saveProfile, applyProfile, type Profile } from './profile.js'
 import {
@@ -31,6 +31,7 @@ app.get('/api/state', asyncH(async (_req, res) => {
     sinkInputs: await listSinkInputs(),
     sourceOutputs: await listSourceOutputs(),
     modules: await listModules(),
+    routes: await listRoutes(),
     profile: await loadProfile(),
     vban: { available: await vbanAvailable(), streams: listVbanStreams() },
   })
@@ -76,6 +77,38 @@ app.post('/api/virtual-mic', asyncH(async (req, res) => {
   profile.virtualMics = [...profile.virtualMics.filter(v => v.name !== name), { name, mics }]
   await saveProfile(profile)
   res.json({ ok: true, moduleIndexes: indexes })
+}))
+
+// --- Routing matrix: patch any source -> any sink, any number of cells at once ---
+app.get('/api/routes', asyncH(async (_req, res) => {
+  res.json({ routes: await listRoutes() })
+}))
+
+app.post('/api/routes', asyncH(async (req, res) => {
+  const { source, sink } = req.body as { source: string; sink: string }
+  if (!source || !sink) return res.status(400).json({ error: 'source and sink are required' })
+  const existing = await listRoutes()
+  if (existing.some(r => r.source === source && r.sink === sink)) {
+    return res.status(409).json({ error: 'route already exists' })
+  }
+  const id = await createRoute(source, sink)
+  const profile = await loadProfile()
+  profile.routes = [...(profile.routes || []).filter(r => !(r.source === source && r.sink === sink)), { source, sink }]
+  await saveProfile(profile)
+  res.json({ ok: true, id })
+}))
+
+app.delete('/api/routes/:id', asyncH(async (req, res) => {
+  const id = parseInt(req.params.id, 10)
+  const existing = await listRoutes()
+  const route = existing.find(r => r.id === id)
+  await removeRoute(id)
+  if (route) {
+    const profile = await loadProfile()
+    profile.routes = (profile.routes || []).filter(r => !(r.source === route.source && r.sink === route.sink))
+    await saveProfile(profile)
+  }
+  res.json({ ok: true })
 }))
 
 app.delete('/api/module/:index', asyncH(async (req, res) => {

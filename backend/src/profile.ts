@@ -1,21 +1,23 @@
 // Saved routing profile: virtual devices to recreate on boot.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createCombinedSink, createVirtualMic, listModules } from './pipewire.js'
+import { createCombinedSink, createVirtualMic, createRoute, listModules, type Route } from './pipewire.js'
 import { startVbanStream, listVbanStreams, type VbanStreamSpec } from './vban.js'
 
 export interface CombinedSinkSpec { name: string; slaves: string[] }
 export interface VirtualMicSpec { name: string; mics: string[] }
+export interface RouteSpec { source: string; sink: string }
 export interface Profile {
   combinedSinks: CombinedSinkSpec[]
   virtualMics: VirtualMicSpec[]
   vbanStreams: VbanStreamSpec[]
+  routes: RouteSpec[]
 }
 
 const DATA_DIR = process.env.PIPEDECK_DATA_DIR || join(process.cwd(), '..', 'data')
 const PROFILE_PATH = join(DATA_DIR, 'profile.json')
 
-export const emptyProfile = (): Profile => ({ combinedSinks: [], virtualMics: [], vbanStreams: [] })
+export const emptyProfile = (): Profile => ({ combinedSinks: [], virtualMics: [], vbanStreams: [], routes: [] })
 
 export async function loadProfile(): Promise<Profile> {
   try {
@@ -50,6 +52,20 @@ export async function applyProfile(p: Profile): Promise<string[]> {
     if (runningVban.has(vs.id)) { actions.push(`skip ${vs.name} (already running)`); continue }
     await startVbanStream(vs)
     actions.push(`started vban ${vs.kind} ${vs.name}`)
+  }
+  const existingRoutes: Route[] = loaded
+    .filter(m => m.name === 'module-loopback')
+    .map(m => ({
+      id: m.index,
+      source: m.args.match(/source=(\S+)/)?.[1] || '',
+      sink: m.args.match(/sink=(\S+)/)?.[1] || '',
+    }))
+  for (const r of p.routes || []) {
+    if (existingRoutes.some(e => e.source === r.source && e.sink === r.sink)) {
+      actions.push(`skip route ${r.source} -> ${r.sink} (already loaded)`); continue
+    }
+    await createRoute(r.source, r.sink)
+    actions.push(`routed ${r.source} -> ${r.sink}`)
   }
   return actions
 }
