@@ -71,3 +71,15 @@ export const restartVban = (id: string) =>
   req<VbanStream>(`/api/vban/${id}/restart`, { method: 'POST' })
 export const removeVban = (id: string) =>
   req(`/api/vban/${id}`, { method: 'DELETE' })
+
+export interface CommitInfo { hash: string; short: string; author: string; date: string; message: string }
+export interface UpdateStatus {
+  branch: string; current: CommitInfo | null; latest: CommitInfo | null
+  behind: number; ahead: number; updateAvailable: boolean; dirty: boolean
+  lastChecked: string; offline: boolean
+}
+export interface ApplyUpdateResult { ok: boolean; log: string[]; restarting: boolean }
+export const getUpdateStatus = (fetch = false) =>
+  req<UpdateStatus>(`/api/update/status${fetch ? '?fetch=1' : ''}`)
+export const applyUpdate = () =>
+  req<ApplyUpdateResult>('/api/update/apply', { method: 'POST' })

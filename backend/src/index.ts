@@ -12,6 +12,7 @@ import {
   vbanAvailable, listVbanStreams, startVbanStream, removeVbanStream, getVbanStream,
   type VbanStreamSpec, type VbanKind,
 } from './vban.js'
+import { getStatus as getUpdateStatus, applyUpdate } from './update.js'
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -165,6 +166,23 @@ app.delete('/api/vban/:id', asyncH(async (req, res) => {
   profile.vbanStreams = profile.vbanStreams.filter(s => s.id !== req.params.id)
   await saveProfile(profile)
   res.json({ ok: true })
+}))
+
+// --- Self-update: pull latest from git, rebuild, restart — no manual re-clone needed ---
+
+app.get('/api/update/status', asyncH(async (req, res) => {
+  res.json(await getUpdateStatus(req.query.fetch === '1' || req.query.fetch === 'true'))
+}))
+
+let updating = false
+app.post('/api/update/apply', asyncH(async (_req, res) => {
+  if (updating) return res.status(409).json({ error: 'an update is already in progress' })
+  updating = true
+  try {
+    res.json(await applyUpdate())
+  } finally {
+    updating = false
+  }
 }))
 
 // Serve the production frontend if present.
